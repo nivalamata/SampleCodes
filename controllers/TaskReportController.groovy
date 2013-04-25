@@ -1,0 +1,220 @@
+package com.mytask
+
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.web.multipart.MultipartFile;
+
+class TaskReportController {
+
+	def scaffold=TaskReport
+    static allowedMethods = [save: "POST", update: "POST", delete: "POST"]
+
+    def index() {
+        redirect(action: "listTaskReport", params: params)
+    }
+	
+	
+	def extractExtension( MultipartFile file ) {
+		String filename = file.getOriginalFilename()
+		return filename.substring(filename.lastIndexOf( "." ) + 1 )
+		}
+	def report={
+		
+		def taskInstance=Task.get(params.id)
+		return [taskInstance:taskInstance]
+	}
+	
+	def deadLinePassed={
+		flash.message="you can not submit task report deadline passed"
+		
+		redirect(uri:'/task/viewTask')
+	}
+	
+	
+	def submitReport={TaskReportCommand trc->  //binds data from params to command object
+		
+		
+		if(trc.hasErrors()){  //uses hasErrors to check validation
+			
+			return [report:trc]
+		}
+		
+		if(!trc.hasErrors()){
+			def myTsk=Task.get(params.id)
+			if((myTsk.dueDate > new Date()) && (myTsk.status.equalsIgnoreCase("UNCOMPLETED"))){
+			myTsk.taskReport =  new TaskReport(trc.properties)
+		
+				
+			MultipartFile f = request.getFile( 'dataReport' )
+				myTsk.taskReport.size = f.getSize() / 1024
+				myTsk.taskReport.extension = extractExtension( f )
+				myTsk.taskReport.fileName=f.getOriginalFilename()
+				
+		
+			if(myTsk.save(flush:true)){
+			
+			 flash.message="task submitted,${myTsk.taskTitle} on  ${ myTsk.taskReport.lastUpdated}"
+			 myTsk.status="COMPLETED"
+			 myTsk.save()
+			 redirect(uri:'/task/viewTask')
+			}
+			}else{
+			
+			redirect(action:"deadLinePassed")
+			}
+		}else{
+		//maybe  not unique userID
+		return[report:trc]
+		}
+	}
+	
+	
+
+    def listTaskReport() {
+        params.max = Math.min(params.max ? params.int('max') : 5, 50)
+	
+		def taskReport=Task.createCriteria().list(params){
+		and{isNotNull('taskReport.id')}
+		
+		}
+		
+		
+        [taskInstanceList: taskReport, taskInstanceTotal: Task.count()]
+    }
+	
+	
+	def displayFileReport={
+		def myBlob=Task.get(params.id)
+		
+		if(myBlob.taskReport.extension=="JPG"){
+		response.contentType="image/jpeg"
+		}
+		
+		if(myBlob.taskReport.extension=="pdf"){
+			response.contentType="Application/pdf"
+			}
+		if(myBlob.taskReport.extension=="doc"){
+			response.contentType="Application/doc"
+			}
+		//response.setContentType( "application-xdownload")
+		response.contentLength=myBlob?.taskReport?.dataReport.length
+		response.outputStream.write(myBlob.taskReport.dataReport)
+	}
+
+	
+	def downloadReport={
+		
+		def file = Task.get(params.id)
+		response.setContentType( "application-xdownload")
+		//response.setHeader("Content-Disposition", "attachment; filename=${file.name+"."+file.extension}  ")
+		response.setHeader("Content-Disposition", "attachment; filename=${file.taskReport.fileName}  ")
+	   response.getOutputStream() << new ByteArrayInputStream( file.taskReport.dataReport )
+	}
+	
+	
+	
+	
+    def create() {
+        [taskReportInstance: new TaskReport(params)]
+    }
+
+    def save() {
+        def taskReportInstance = new TaskReport(params)
+        if (!taskReportInstance.save(flush: true)) {
+            render(view: "create", model: [taskReportInstance: taskReportInstance])
+            return
+        }
+
+		flash.message = message(code: 'default.created.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), taskReportInstance.id])
+        redirect(action: "show", id: taskReportInstance.id)
+    }
+
+   def show() {
+        def taskInstance = Task.get(params.id)
+        if (!taskInstance) {
+			flash.message = message(code: 'default.not.found.message', args: [message(code: 'task.label', default: 'Task'), params.id])
+            redirect(action: "list")
+            return
+        }
+
+        [taskInstance: taskInstance]
+    }
+
+    def edit() {
+        def taskReportInstance = TaskReport.get(params.id)
+        if (!taskReportInstance) {
+            flash.message = message(code: 'default.not.found.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), params.id])
+            redirect(action: "listTaskReport")
+            return
+        }
+
+        [taskReportInstance: taskReportInstance]
+    }
+
+    def update() {
+        def taskReportInstance = TaskReport.get(params.id)
+        if (!taskReportInstance) {
+            flash.message = message(code: 'default.not.found.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), params.id])
+            redirect(action: "listTaskReport")
+            return
+        }
+
+        if (params.version) {
+            def version = params.version.toLong()
+            if (taskReportInstance.version > version) {
+                taskReportInstance.errors.rejectValue("version", "default.optimistic.locking.failure",
+                          [message(code: 'taskReport.label', default: 'TaskReport')] as Object[],
+                          "Another user has updated this TaskReport while you were editing")
+                render(view: "edit", model: [taskReportInstance: taskReportInstance])
+                return
+            }
+        }
+
+        taskReportInstance.properties = params
+
+        if (!taskReportInstance.save(flush: true)) {
+            render(view: "edit", model: [taskReportInstance: taskReportInstance])
+            return
+        }
+
+		flash.message = message(code: 'default.updated.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), taskReportInstance.id])
+        redirect(action: "show", id: taskReportInstance.id)
+    }
+
+    def delete() {
+        def taskReportInstance = TaskReport.get(params.id)
+        if (!taskReportInstance) {
+			flash.message = message(code: 'default.not.found.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), params.id])
+            redirect(action: "listTaskReport")
+            return
+        }
+
+        try {
+            taskReportInstance.delete(flush: true)
+			flash.message = message(code: 'default.deleted.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), params.id])
+            redirect(action: "listTaskReport")
+        }
+        catch (DataIntegrityViolationException e) {
+			flash.message = message(code: 'default.not.deleted.message', args: [message(code: 'taskReport.label', default: 'TaskReport'), params.id])
+            redirect(action: "show", id: params.id)
+        }
+    }
+}
+
+
+
+
+class TaskReportCommand {
+	
+	
+	
+	 String shortReport
+	 byte[] dataReport
+	
+	 static constraints = {
+		shortReport(maxSize:1000,blank:false)
+		dataReport( nullable: true)
+
+	 }
+	 
+	 
+	}
